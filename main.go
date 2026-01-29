@@ -4,20 +4,30 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
+	"net"
 	"strings"
 )
 
 func main() {
-	f, err := os.Open("messages.txt")
+	l, err := net.Listen("tcp", ":42069")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	linesChan := getLinesChannel(f)
+	defer l.Close()
 
-	for i := range linesChan {
-		fmt.Printf("read: %s\n", i)
+	for {
+		fmt.Println("Waiting for Conenction...")
+		conn, err := l.Accept()
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println("Connection Accepted...")
+		linesChan := getLinesChannel(conn)
+
+		for i := range linesChan {
+			fmt.Println(i)
+		}
 	}
 }
 
