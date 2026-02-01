@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"slices"
 	"strings"
 )
 
@@ -25,28 +26,41 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 
 	reqLine, err := parseRequestLine(r)
 	if err != nil {
-		return &Request{}, err
+		return nil, err
 	}
 
-	req := &Request{
-		RequestLine: reqLine,
-	}
-
-	return req, nil
+	return &Request{
+		RequestLine: *reqLine,
+	}, nil
 }
 
-func parseRequestLine(r []byte) (RequestLine, error) {
+func parseRequestLine(r []byte) (*RequestLine, error) {
 	parts := strings.Split(string(r), "\r\n")
 	subParts := strings.Split(parts[0], " ")
 	if len(subParts) != 3 {
-		return RequestLine{}, fmt.Errorf("Malformed Request: %s", r)
+		return nil, fmt.Errorf("Malformed Request: %s", subParts)
+	}
+	method := subParts[0]
+	requestTarget := subParts[1]
+	httpVer := subParts[2]
+
+	acceptableMethods := []string{"GET", "POST", "PUT", "DELETE"}
+
+	if !slices.Contains(acceptableMethods, method) {
+		return nil, fmt.Errorf("Malformed Method: %s", subParts)
 	}
 
-	requestLine := RequestLine{
-		Method:        subParts[0],
-		RequestTarget: subParts[1],
-		HttpVersion:   subParts[2][5:],
+	if !strings.HasPrefix(requestTarget, "/") {
+		return nil, fmt.Errorf("Malformed RequestTarget: %s", subParts)
 	}
 
-	return requestLine, nil
+	if httpVer != "HTTP/1.1" {
+		return nil, fmt.Errorf("Malformed HttpVersion: %s", subParts)
+	}
+
+	return &RequestLine{
+		Method:        method,
+		RequestTarget: requestTarget,
+		HttpVersion:   strings.Trim(httpVer, "HTTP/"),
+	}, nil
 }
