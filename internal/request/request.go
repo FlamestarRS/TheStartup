@@ -3,13 +3,13 @@ package request
 import (
 	"fmt"
 	"io"
-	"log"
 	"slices"
 	"strings"
 )
 
 type Request struct {
 	RequestLine RequestLine
+	State       requestState
 }
 
 type RequestLine struct {
@@ -18,27 +18,59 @@ type RequestLine struct {
 	Method        string
 }
 
+type requestState int
+
+const (
+	requestStateInitialized requestState = iota
+	requestStateDone
+)
+
+const bufferSize = 8
+
 func RequestFromReader(reader io.Reader) (*Request, error) {
-	r, err := io.ReadAll(reader)
-	if err != nil {
-		log.Fatal(err)
+	buffer := make([]byte, bufferSize)
+	readToIndex := 0
+
+	req := &Request{
+		RequestLine: RequestLine{},
+		State:       requestStateInitialized,
 	}
 
-	reqLine, err := parseRequestLine(r)
-	if err != nil {
-		return nil, err
+	for req.State != requestStateDone {
+		if readToIndex >= len(buffer) {
+			newBuffer := make([]byte, len(buffer)*2)
+			copy(newBuffer, buffer)
+			buffer = newBuffer
+		}
+
+		numBytesRead, err := reader.Read(buffer[readToIndex:])
+		if err == io.EOF {
+			req.State = requestStateDone
+			break
+		}
+		readToIndex += numBytesRead
+
+		numBytesParsed, err := req.parse(buffer[:readToIndex])
+		if err != nil {
+			return nil, err
+		}
+
+		copy(buffer, buffer[numBytesParsed:])
+		readToIndex -= numBytesParsed
 	}
 
-	return &Request{
-		RequestLine: *reqLine,
-	}, nil
+	return req, nil
 }
 
-func parseRequestLine(r []byte) (*RequestLine, error) {
+func parseRequestLine(r []byte) (*RequestLine, int, error) {
+	data := len(r)
 	parts := strings.Split(string(r), "\r\n")
+	if len(parts) == 1 {
+		return nil, 0, nil
+	}
 	subParts := strings.Split(parts[0], " ")
 	if len(subParts) != 3 {
-		return nil, fmt.Errorf("Malformed Request: %s", subParts)
+		return nil, data, fmt.Errorf("Malformed Request: %s", subParts)
 	}
 	method := subParts[0]
 	requestTarget := subParts[1]
@@ -47,20 +79,40 @@ func parseRequestLine(r []byte) (*RequestLine, error) {
 	acceptableMethods := []string{"GET", "POST", "PUT", "DELETE"}
 
 	if !slices.Contains(acceptableMethods, method) {
-		return nil, fmt.Errorf("Malformed Method: %s", subParts)
+		return nil, data, fmt.Errorf("Malformed Method: %s", subParts)
 	}
 
 	if !strings.HasPrefix(requestTarget, "/") {
-		return nil, fmt.Errorf("Malformed RequestTarget: %s", subParts)
+		return nil, data, fmt.Errorf("Malformed RequestTarget: %s", subParts)
 	}
 
 	if httpVer != "HTTP/1.1" {
-		return nil, fmt.Errorf("Malformed HttpVersion: %s", subParts)
+		return nil, data, fmt.Errorf("Malformed HttpVersion: %s", subParts)
 	}
 
 	return &RequestLine{
 		Method:        method,
 		RequestTarget: requestTarget,
 		HttpVersion:   strings.Trim(httpVer, "HTTP/"),
-	}, nil
+	}, data, nil
+}
+
+func (r *Request) parse(data []byte) (int, error) {
+	switch r.State {
+	case requestStateInitialized:
+		reqLine, numBytes, err := parseRequestLine(data)
+		if err != nil {
+			return 0, err
+		}
+		if numBytes == 0 {
+			return 0, nil
+		}
+		r.RequestLine = *reqLine
+		r.State = 1
+		return numBytes, nil
+	case requestStateDone:
+		return 0, fmt.Errorf("Error: Trying to read data in a done state")
+	default:
+		return 0, fmt.Errorf("Error: Unknown state")
+	}
 }
