@@ -90,4 +90,15 @@ func TestHeaders(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, 0, n)
 	assert.False(t, done)
+
+	// Test: Valid header already exists
+	headers = NewHeaders()
+	headers["host"] = "EXISTS"
+	data = []byte("Host: localhost:42069\r\n\r\n")
+	n, done, err = headers.Parse(data)
+	require.NoError(t, err)
+	require.NotNil(t, headers)
+	assert.Equal(t, "EXISTS, localhost:42069", headers["host"])
+	assert.Equal(t, 23, n)
+	assert.False(t, done)
 }

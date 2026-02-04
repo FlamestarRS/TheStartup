@@ -31,6 +31,11 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 	key = strings.ToLower(key)
 	value := strings.TrimSpace(string(header[1]))
 
-	h[key] = value
+	if exists, ok := h[key]; ok {
+		h[key] = exists + ", " + value
+	} else {
+		h[key] = value
+	}
+
 	return numBytes, false, nil
 }
