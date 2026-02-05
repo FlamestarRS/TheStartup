@@ -1,15 +1,19 @@
 package request
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"slices"
 	"strings"
+
+	"TheStartup/internal/headers"
 )
 
 type Request struct {
 	RequestLine RequestLine
 	State       requestState
+	Headers     headers.Headers
 }
 
 type RequestLine struct {
@@ -22,6 +26,7 @@ type requestState int
 
 const (
 	requestStateInitialized requestState = iota
+	requestStateParsingHeaders
 	requestStateDone
 )
 
@@ -34,6 +39,7 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 	req := &Request{
 		RequestLine: RequestLine{},
 		State:       requestStateInitialized,
+		Headers:     headers.NewHeaders(),
 	}
 
 	for req.State != requestStateDone {
@@ -44,9 +50,14 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 		}
 
 		numBytesRead, err := reader.Read(buffer[readToIndex:])
-		if err == io.EOF {
-			req.State = requestStateDone
-			break
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				if req.State != requestStateDone {
+					return nil, fmt.Errorf("Error: Missing end of headers")
+				}
+				break
+			}
+			return nil, err
 		}
 		readToIndex += numBytesRead
 
@@ -58,7 +69,6 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 		copy(buffer, buffer[numBytesParsed:])
 		readToIndex -= numBytesParsed
 	}
-
 	return req, nil
 }
 
@@ -98,6 +108,21 @@ func parseRequestLine(r []byte) (*RequestLine, int, error) {
 }
 
 func (r *Request) parse(data []byte) (int, error) {
+	totalBytesParsed := 0
+	for r.State != requestStateDone {
+		numBytes, err := r.parseSingle(data[totalBytesParsed:])
+		if err != nil {
+			return 0, err
+		}
+		totalBytesParsed += numBytes
+		if numBytes == 0 {
+			break
+		}
+	}
+	return totalBytesParsed, nil
+}
+
+func (r *Request) parseSingle(data []byte) (int, error) {
 	switch r.State {
 	case requestStateInitialized:
 		reqLine, numBytes, err := parseRequestLine(data)
@@ -108,7 +133,16 @@ func (r *Request) parse(data []byte) (int, error) {
 			return 0, nil
 		}
 		r.RequestLine = *reqLine
-		r.State = 1
+		r.State = requestStateParsingHeaders
+		return numBytes, nil
+	case requestStateParsingHeaders:
+		numBytes, done, err := r.Headers.Parse(data)
+		if err != nil {
+			return 0, fmt.Errorf("Error parsing header: %s", err)
+		}
+		if done {
+			r.State = requestStateDone
+		}
 		return numBytes, nil
 	case requestStateDone:
 		return 0, fmt.Errorf("Error: Trying to read data in a done state")
