@@ -1,6 +1,7 @@
 package request
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -73,7 +74,7 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 }
 
 func parseRequestLine(r []byte) (*RequestLine, int, error) {
-	data := len(r)
+	data := bytes.Index(r, []byte("\r\n"))
 	parts := strings.Split(string(r), "\r\n")
 	if len(parts) == 1 {
 		return nil, 0, nil
@@ -104,7 +105,7 @@ func parseRequestLine(r []byte) (*RequestLine, int, error) {
 		Method:        method,
 		RequestTarget: requestTarget,
 		HttpVersion:   strings.Trim(httpVer, "HTTP/"),
-	}, data, nil
+	}, data + 2, nil
 }
 
 func (r *Request) parse(data []byte) (int, error) {
